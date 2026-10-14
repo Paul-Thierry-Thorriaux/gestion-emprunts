@@ -333,6 +333,13 @@
     .suggestion-item:hover { background: rgba(37, 99, 235, 0.35); }
     .tagline { font-size: 0.78rem; color: var(--text-muted); }
 
+    /* Accès gestionnaire */
+    .manager-panel {max-width:1120px;margin:1rem auto 0;padding:0 1rem;display:flex;align-items:center;gap:.8rem;flex-wrap:wrap}
+    .manager-panel input {width:240px;max-width:100%;padding:.5rem;border-radius:.6rem;border:1px solid #94a3b8;background:#0f172a;color:white}
+    .manager-panel .small {color:#cbd5e1}
+    body:not(.is-admin) .admin-only {display:none !important}
+    body:not(.is-admin) .actions-column {display:none !important}
+    #manager-feedback {min-height:1.1em}
     /* ✅ MODALE ZOOM */
     #img-modal {
       display: none;
@@ -371,6 +378,17 @@
   </div>
 </header>
 
+<div class="manager-panel" aria-label="Accès gestionnaire">
+  <span id="access-label" class="badge badge-warning">👁 Mode consultation</span>
+  <button id="admin-open" type="button" class="btn-secondary">🔐 Accès gestionnaire</button>
+  <form id="admin-login" style="display:none;grid-template-columns:1fr auto auto;align-items:center;margin:0" autocomplete="off">
+    <input id="admin-code" type="password" placeholder="Code secret" aria-label="Code secret gestionnaire" required minlength="8" autocomplete="off">
+    <button class="btn-primary" type="submit">Valider</button>
+    <button class="btn-secondary" type="button" id="admin-cancel">Annuler</button>
+  </form>
+  <button id="admin-logout" type="button" class="btn-secondary" style="display:none">🔒 Se déconnecter</button>
+  <span id="manager-feedback" class="small" role="status" aria-live="polite"></span>
+</div>
 <main>
   <div class="tabs-wrapper">
     <div class="tabs">
@@ -385,7 +403,7 @@
   <section id="tab-materials" class="tab active">
     <h2>Matériel disponible <span class="subtitle-chip">Ajout à tout moment, même en cours d’année</span></h2>
     <div class="grid">
-      <div class="card-sub">
+      <div class="card-sub admin-only">
         <h3>➕ Ajouter / modifier du matériel</h3>
         <form id="material-form">
           <input type="hidden" id="material-id">
@@ -427,7 +445,7 @@
         </div>
         <table>
           <thead>
-          <tr><th>Photo</th><th>Nom</th><th>Description</th><th>Statut</th><th>Actions</th></tr>
+          <tr><th>Photo</th><th>Nom</th><th>Description</th><th>Statut</th><th class="actions-column">Actions</th></tr>
           </thead>
           <tbody id="material-table-body"></tbody>
         </table>
@@ -439,7 +457,7 @@
   <section id="tab-staff" class="tab">
     <h2>Membres du personnel <span class="subtitle-chip">Qui peut emprunter le matériel ?</span></h2>
     <div class="grid">
-      <div class="card-sub">
+      <div class="card-sub admin-only">
         <h3>➕ Ajouter un membre</h3>
         <form id="staff-form">
           <input type="hidden" id="staff-id">
@@ -470,7 +488,7 @@
         </div>
         <table>
           <!-- ✅ AJOUT COLONNE Actions -->
-          <thead><tr><th>Nom</th><th>Emprunts en cours</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Nom</th><th>Emprunts en cours</th><th class="actions-column">Actions</th></tr></thead>
           <tbody id="staff-table-body"></tbody>
         </table>
       </div>
@@ -481,7 +499,7 @@
   <section id="tab-loans" class="tab">
     <h2>Emprunts <span class="subtitle-chip">Nouveau prêt & suivi en temps réel</span></h2>
     <div class="grid">
-      <div class="card-sub">
+      <div class="card-sub admin-only">
         <h3>📝 Enregistrer un nouvel emprunt</h3>
         <form id="loan-form">
           <div>
@@ -529,7 +547,7 @@
           </div>
         </div>
         <table>
-          <thead><tr><th>Matériel</th><th>Emprunté par</th><th>Période</th><th>Statut</th><th>Action</th></tr></thead>
+          <thead><tr><th>Matériel</th><th>Emprunté par</th><th>Période</th><th>Statut</th><th class="actions-column">Action</th></tr></thead>
           <tbody id="loan-table-body"></tbody>
         </table>
       </div>
@@ -596,35 +614,95 @@
     });
   }
 
-  function ensureHiddenIframe() {
-    var iframe = document.getElementById("hidden_iframe_sink");
-    if (!iframe) {
-      iframe = document.createElement("iframe");
-      iframe.name = "hidden_iframe_sink";
-      iframe.id = "hidden_iframe_sink";
-      iframe.style.display = "none";
-      document.body.appendChild(iframe);
-    }
+  // Le code secret n'est jamais enregistré dans GitHub ou dans le navigateur.
+  var adminCode = '';
+  var postPending = null;
+  var postQueue = Promise.resolve();
+  function nonce_() { return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2); }
+
+  function protectedPost_(action, fields) {
+    var run = function () {
+      return new Promise(function(resolve, reject) {
+        if (postPending) { reject(new Error('Une opération est déjà en cours.')); return; }
+        var nonce = nonce_();
+        var iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.name = 'sink_' + nonce;
+        document.body.appendChild(iframe);
+        var form = document.createElement('form');
+        form.method = 'POST'; form.action = BACKEND_URL; form.target = iframe.name;
+        form.style.display = 'none';
+        var values = Object.assign({}, fields || {}, {action: action, adminCode: adminCode, nonce: nonce});
+        Object.keys(values).forEach(function(key) {
+          var input = document.createElement('input');
+          input.type = 'hidden'; input.name = key; input.value = String(values[key]);
+          form.appendChild(input);
+        });
+        document.body.appendChild(form);
+        var timeout = setTimeout(function(){ cleanup(); reject(new Error('Aucune confirmation du serveur. Vérifie la connexion.')); }, 25000);
+        function cleanup() { clearTimeout(timeout); window.removeEventListener('message', onMessage); form.remove(); iframe.remove(); postPending = null; }
+        function onMessage(ev) {
+          // La réponse doit provenir de NOTRE iframe et inclure le bon identifiant de demande.
+          if (ev.source !== iframe.contentWindow) return;
+          var msg = ev.data;
+          if (!msg || msg.type !== 'adminResponse' || msg.nonce !== nonce || msg.action !== action) return;
+          cleanup();
+          if (msg.ok) resolve(msg);
+          else reject(new Error(msg.error || 'Opération refusée par le serveur.'));
+        }
+        postPending = nonce;
+        window.addEventListener('message', onMessage);
+        try { form.submit(); } catch(err) { cleanup(); reject(err); }
+      });
+    };
+    var result = postQueue.then(run);
+    postQueue = result.catch(function(){});
+    return result;
   }
 
   function saveRemote(type, data) {
-    ensureHiddenIframe();
-    var payload = JSON.stringify({ type: type, data: data });
+    if (!adminCode) return Promise.reject(new Error('Accès gestionnaire requis.'));
+    return protectedPost_('save', {payload: JSON.stringify({type: type, data: data})});
+  }
 
-    var form = document.createElement("form");
-    form.method = "POST";
-    form.action = BACKEND_URL;
-    form.target = "hidden_iframe_sink";
-
-    var input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "payload";
-    input.value = payload;
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
-    form.remove();
+  async function refreshRemote_() {
+    materials = await loadRemote('materials');
+    staff = await loadRemote('staff');
+    loans = await loadRemote('loans');
+    rerenderAll_();
+  }
+  function rerenderAll_() {
+    renderMaterialTable(document.getElementById('material-search').value);
+    renderStaffTable(document.getElementById('staff-search').value);
+    renderLoansTable(document.getElementById('loan-search').value);
+    renderOverviewTable(document.getElementById('overview-search').value);
+  }
+  async function persist_(type, data) {
+    try {
+      await saveRemote(type, data);
+      await refreshRemote_();
+      document.getElementById('manager-feedback').textContent = '✓ Enregistré dans Google Sheets';
+      return true;
+    } catch (err) {
+      document.getElementById('manager-feedback').textContent = 'Échec : ' + err.message;
+      alert('Enregistrement non confirmé : ' + err.message + '\nLes données vont être rechargées.');
+      await refreshRemote_();
+      return false;
+    }
+  }
+  function requireAdmin_() {
+    if (postPending) { alert("Une opération est en cours. Réessaie après sa confirmation."); return false; }
+    if (adminCode && document.body.classList.contains('is-admin')) return true;
+    alert('Accès gestionnaire nécessaire.'); return false;
+  }
+  function setAdmin_(enabled) {
+    document.body.classList.toggle('is-admin', enabled);
+    document.getElementById('admin-open').style.display = enabled ? 'none' : '';
+    document.getElementById('admin-logout').style.display = enabled ? '' : 'none';
+    document.getElementById('admin-login').style.display = 'none';
+    document.getElementById('access-label').textContent = enabled ? '🔓 Mode gestionnaire' : '👁 Mode consultation';
+    document.getElementById('access-label').className = 'badge ' + (enabled ? 'badge-success' : 'badge-warning');
+    rerenderAll_();
   }
 
   // =========================================================
@@ -703,6 +781,7 @@
   }
 
   function deleteMaterial(materialId) {
+    if (!requireAdmin_()) return;
     var m = materials.find(function (x) { return x.id === materialId; });
     if (!m) return;
 
@@ -720,7 +799,7 @@
     if (!confirm(msg)) return;
 
     materials = materials.filter(function (x) { return x.id !== materialId; });
-    saveRemote("materials", materials);
+    persist_("materials", materials);
 
     renderMaterialTable(document.getElementById("material-search").value);
     renderOverviewTable(document.getElementById("overview-search").value);
@@ -732,6 +811,7 @@
 
   /* ✅ AJOUT : suppression d’un membre du personnel */
   function deleteStaff(staffId) {
+    if (!requireAdmin_()) return;
     var s = staff.find(function (x) { return x.id === staffId; });
     if (!s) return;
 
@@ -745,7 +825,7 @@
     if (!confirm("Confirmer la suppression de : " + fullName.trim() + " ?")) return;
 
     staff = staff.filter(function (x) { return x.id !== staffId; });
-    saveRemote("staff", staff);
+    persist_("staff", staff);
 
     renderStaffTable(document.getElementById("staff-search").value);
     renderLoansTable(document.getElementById("loan-search").value);
@@ -809,13 +889,13 @@
       btnEdit.className = "btn-secondary";
       btnEdit.textContent = "Modifier";
       btnEdit.addEventListener("click", function () { fillMaterialForm(m.id); });
-      tdActions.appendChild(btnEdit);
+      if (adminCode) tdActions.appendChild(btnEdit);
 
       var btnDelete = document.createElement("button");
       btnDelete.className = "btn-danger";
       btnDelete.textContent = "Supprimer";
       btnDelete.addEventListener("click", function () { deleteMaterial(m.id); });
-      tdActions.appendChild(btnDelete);
+      if (adminCode) tdActions.appendChild(btnDelete);
 
       tr.appendChild(tdPhoto);
       tr.appendChild(tdName);
@@ -828,6 +908,7 @@
   }
 
   function fillMaterialForm(id) {
+    if (!requireAdmin_()) return;
     var m = materials.find(function (x) { return x.id === id; });
     if (!m) return;
 
@@ -884,7 +965,7 @@
       btnDelete.className = "btn-danger";
       btnDelete.textContent = "Supprimer";
       btnDelete.addEventListener("click", function () { deleteStaff(s.id); });
-      tdActions.appendChild(btnDelete);
+      if (adminCode) tdActions.appendChild(btnDelete);
 
       tr.appendChild(tdName);
       tr.appendChild(tdCount);
@@ -963,7 +1044,7 @@
       btnBack.className = "btn-primary";
       btnBack.innerHTML = "↩ Marquer comme revenu";
       btnBack.addEventListener("click", function () { markLoanReturned(loan.id); });
-      tdAction.appendChild(btnBack);
+      if (adminCode) tdAction.appendChild(btnBack);
 
       tr.appendChild(tdMat);
       tr.appendChild(tdStaff);
@@ -976,6 +1057,7 @@
   }
 
   function markLoanReturned(loanId) {
+    if (!requireAdmin_()) return;
     var changed = false;
     loans.forEach(function (loan) {
       if (loan.id === loanId && !loan.returnedDate) {
@@ -985,7 +1067,7 @@
     });
 
     if (changed) {
-      saveRemote("loans", loans);
+      persist_("loans", loans);
       renderMaterialTable(document.getElementById("material-search").value);
       renderLoansTable(document.getElementById("loan-search").value);
       renderOverviewTable(document.getElementById("overview-search").value);
@@ -1140,6 +1222,36 @@
     });
 
     setupTabs();
+    document.getElementById('admin-open').addEventListener('click', function() {
+      document.getElementById('admin-login').style.display = 'grid';
+      document.getElementById('admin-code').focus();
+    });
+    document.getElementById('admin-cancel').addEventListener('click', function() {
+      document.getElementById('admin-login').style.display = 'none';
+      document.getElementById('admin-code').value = '';
+    });
+    document.getElementById('admin-logout').addEventListener('click', function() {
+      adminCode = '';
+      document.getElementById('admin-code').value = '';
+      setAdmin_(false);
+      document.getElementById('manager-feedback').textContent = 'Déconnexion effectuée.';
+    });
+    document.getElementById('admin-login').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      adminCode = document.getElementById('admin-code').value;
+      document.getElementById('manager-feedback').textContent = 'Vérification du code…';
+      try {
+        await protectedPost_('checkAdmin', {});
+        document.getElementById('admin-code').value = '';
+        setAdmin_(true);
+        document.getElementById('manager-feedback').textContent = 'Accès autorisé.';
+      } catch(err) {
+        adminCode = '';
+        setAdmin_(false);
+        document.getElementById('manager-feedback').textContent = 'Accès refusé : ' + err.message;
+      }
+    });
+
 
     if (!BACKEND_URL || BACKEND_URL.indexOf("http") !== 0) {
       setMode(false, "URL Apps Script manquante");
@@ -1151,16 +1263,13 @@
       materials = await loadRemote("materials");
       staff = await loadRemote("staff");
       loans = await loadRemote("loans");
-      setMode(true, "Mode partagé – Google Sheets");
+      setMode(true, "Google Sheets connecté");
     } catch (e) {
       setMode(false, "Erreur de connexion");
       materials = []; staff = []; loans = [];
     }
 
-    renderMaterialTable("");
-    renderStaffTable("");
-    renderLoansTable("");
-    renderOverviewTable("");
+    rerenderAll_();
 
     document.getElementById("material-search").addEventListener("input", function (e) { renderMaterialTable(e.target.value); });
     document.getElementById("staff-search").addEventListener("input", function (e) { renderStaffTable(e.target.value); });
@@ -1170,6 +1279,7 @@
     // Enregistrer matériel
     document.getElementById("material-form").addEventListener("submit", async function (e) {
       e.preventDefault();
+      if (!requireAdmin_()) return;
 
       var id = document.getElementById("material-id").value;
       var name = document.getElementById("material-name").value.trim();
@@ -1196,7 +1306,7 @@
         });
       }
 
-      saveRemote("materials", materials);
+      if (!await persist_("materials", materials)) return;
 
       resetMaterialForm();
       renderMaterialTable(document.getElementById("material-search").value);
@@ -1206,8 +1316,9 @@
     document.getElementById("material-reset").addEventListener("click", function () { resetMaterialForm(); });
 
     // Enregistrer personnel
-    document.getElementById("staff-form").addEventListener("submit", function (e) {
+    document.getElementById("staff-form").addEventListener("submit", async function (e) {
       e.preventDefault();
+      if (!requireAdmin_()) return;
 
       var id = document.getElementById("staff-id").value;
       var first = document.getElementById("staff-firstname").value.trim();
@@ -1221,7 +1332,7 @@
         staff.push({ id: generateId("pers"), firstName: first, lastName: last });
       }
 
-      saveRemote("staff", staff);
+      if (!await persist_("staff", staff)) return;
       resetStaffForm();
       renderStaffTable(document.getElementById("staff-search").value);
     });
@@ -1253,8 +1364,9 @@
     });
 
     // Enregistrer emprunt
-    document.getElementById("loan-form").addEventListener("submit", function (e) {
+    document.getElementById("loan-form").addEventListener("submit", async function (e) {
       e.preventDefault();
+      if (!requireAdmin_()) return;
 
       var materialId = document.getElementById("loan-material-id").value;
       var staffId = document.getElementById("loan-staff").value;
@@ -1282,7 +1394,7 @@
         returnedDate: ""
       });
 
-      saveRemote("loans", loans);
+      if (!await persist_("loans", loans)) return;
 
       renderMaterialTable(document.getElementById("material-search").value);
       renderLoansTable(document.getElementById("loan-search").value);
