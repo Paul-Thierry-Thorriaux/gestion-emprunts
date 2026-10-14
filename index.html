@@ -644,7 +644,11 @@
         function onMessage(ev) {
           // Apps Script peut imbriquer sa propre iframe : ev.source n'est alors pas
           // l'iframe créée ici. Valider l'origine Google ET l'identifiant aléatoire.
-          if (!/^https:\/\/([a-z0-9-]+\.)*googleusercontent\.com$/i.test(ev.origin) &&
+          // Les réponses HtmlService peuvent venir d'une iframe Google sandboxée
+          // dont l'origine apparaît comme « null ». Dans ce cas, le nonce
+          // imprévisible et l'action attendue restent obligatoires.
+          if (ev.origin !== 'null' &&
+              !/^https:\/\/([a-z0-9-]+\.)*googleusercontent\.com$/i.test(ev.origin) &&
               ev.origin !== 'https://script.google.com') return;
           var msg = ev.data;
           if (!msg || msg.type !== 'adminResponse' || msg.nonce !== nonce || msg.action !== action) return;
