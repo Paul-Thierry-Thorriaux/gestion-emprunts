@@ -642,8 +642,10 @@
         var timeout = setTimeout(function(){ cleanup(); reject(new Error('Aucune confirmation du serveur. Vérifie la connexion.')); }, 25000);
         function cleanup() { clearTimeout(timeout); window.removeEventListener('message', onMessage); form.remove(); iframe.remove(); postPending = null; }
         function onMessage(ev) {
-          // La réponse doit provenir de NOTRE iframe et inclure le bon identifiant de demande.
-          if (ev.source !== iframe.contentWindow) return;
+          // Apps Script peut imbriquer sa propre iframe : ev.source n'est alors pas
+          // l'iframe créée ici. Valider l'origine Google ET l'identifiant aléatoire.
+          if (!/^https:\/\/([a-z0-9-]+\.)*googleusercontent\.com$/i.test(ev.origin) &&
+              ev.origin !== 'https://script.google.com') return;
           var msg = ev.data;
           if (!msg || msg.type !== 'adminResponse' || msg.nonce !== nonce || msg.action !== action) return;
           cleanup();
