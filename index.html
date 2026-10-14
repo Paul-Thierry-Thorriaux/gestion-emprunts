@@ -547,7 +547,7 @@
           </div>
         </div>
         <table>
-          <thead><tr><th>Matériel</th><th>Emprunté par</th><th>Période</th><th>Statut</th><th class="actions-column">Action</th></tr></thead>
+          <thead><tr><th>Matériel</th><th>Emprunté par</th><th>Période</th><th>Statut et retour</th></tr></thead>
           <tbody id="loan-table-body"></tbody>
         </table>
       </div>
@@ -1045,18 +1045,30 @@
         tdStatus.appendChild(spanOk);
       }
 
-      var tdAction = document.createElement("td");
-      var btnBack = document.createElement("button");
-      btnBack.className = "btn-primary";
-      btnBack.innerHTML = "↩ Marquer comme revenu";
-      btnBack.addEventListener("click", function () { markLoanReturned(loan.id); });
-      if (adminCode) tdAction.appendChild(btnBack);
+      // Le retour est placé sous le statut, visible sans chercher une colonne latérale.
+      // Seuls les gestionnaires déverrouillés peuvent voir ce bouton.
+      if (adminCode && document.body.classList.contains('is-admin')) {
+        var returnLine = document.createElement('div');
+        returnLine.style.marginTop = '0.65rem';
+        var btnBack = document.createElement('button');
+        btnBack.type = 'button';
+        btnBack.className = 'btn-primary';
+        btnBack.style.whiteSpace = 'normal';
+        btnBack.style.textAlign = 'center';
+        btnBack.textContent = '↩ Marquer comme revenu';
+        btnBack.addEventListener('click', function () {
+          if (confirm('Confirmer le retour du matériel « ' + mName + ' » ?')) {
+            markLoanReturned(loan.id);
+          }
+        });
+        returnLine.appendChild(btnBack);
+        tdStatus.appendChild(returnLine);
+      }
 
       tr.appendChild(tdMat);
       tr.appendChild(tdStaff);
       tr.appendChild(tdPeriod);
       tr.appendChild(tdStatus);
-      tr.appendChild(tdAction);
 
       tbody.appendChild(tr);
     });
